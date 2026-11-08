@@ -168,7 +168,7 @@ with left:
     st.subheader("Вероятность остаться в боковике")
     rows = []
     for x in (1, 2, 3, 5):
-                p = 2 * phi((x / 100) / sig) - 1
+        p = 2 * phi((x / 100) / sig) - 1
         shown = ">99%" if p > 0.99 else f"{p * 100:.0f}%"
         rows.append({"Диапазон": f"±{x}% от текущей цены",
                      "Вероятность за 24 ч": shown})
