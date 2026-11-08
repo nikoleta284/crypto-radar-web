@@ -109,7 +109,6 @@ def make_chart(f, window_h, coin):
 
     fig.update_layout(
         template="plotly_dark", height=560, hovermode="x unified",
-        title=f"{coin}: цена и диапазон на ближайшие 24 часа",
         margin=dict(t=60, l=10, r=10, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         yaxis_title="Цена, USD",
@@ -160,7 +159,7 @@ c3.metric("Диапазон 80%",
           f"{price * np.exp(-Z80 * sig):,.0f} – {price * np.exp(Z80 * sig):,.0f}")
 c4.metric("Диапазон 50%",
           f"{price * np.exp(-Z50 * sig):,.0f} – {price * np.exp(Z50 * sig):,.0f}")
-
+st.subheader(f"{coin}: цена и диапазон на ближайшие 24 часа")
 st.plotly_chart(make_chart(f, window_h, coin), use_container_width=True)
 
 left, right = st.columns(2)
