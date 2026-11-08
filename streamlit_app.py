@@ -1,6 +1,7 @@
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -14,6 +15,7 @@ Z80, Z50 = 1.2816, 0.6745
 FEATS = ['v24', 'v72', 'v168', 'ewm72', 'absr1', 'absr6', 'ret24', 'hour']
 # Модель проверена (walk-forward на ~13 000 часов) только на BTC и ETH
 COINS = {"BTC": "BTC-USD", "ETH": "ETH-USD"}
+N_PATHS = 12
 
 st.set_page_config(page_title="Крипто-радар", page_icon="📊", layout="wide")
 
@@ -24,7 +26,8 @@ st.set_page_config(page_title="Крипто-радар", page_icon="📊", layou
 
 @st.cache_data(ttl=3600, show_spinner="Загружаю данные...")
 def get_prices(ticker):
-    raw = yf.download(ticker, interval="1h", period="730d", progress=False, auto_adjust=True, timeout=20)
+    raw = yf.download(ticker, interval="1h", period="730d", progress=False,
+                      auto_adjust=True, timeout=20)
     if raw is None or raw.empty:
         raise RuntimeError("Источник данных не вернул свечи, попробуйте позже.")
     close = raw['Close']
@@ -72,10 +75,25 @@ def run_forecast(ticker):
 
 
 # ----------------------------------------------------------------------
+# Симуляция примеров путей (направление случайное, размах из прогноза)
+# ----------------------------------------------------------------------
+
+def simulate_paths(p0, sigma_day, n_paths, seed):
+    rng = np.random.default_rng(seed)
+    sig_h = sigma_day / np.sqrt(24)
+    # t-распределение (4 степени свободы) даёт «толстые хвосты», как у реальной крипты;
+    # делим на sqrt(2), чтобы дисперсия осталась равной 1
+    shocks = rng.standard_t(4, size=(n_paths, 24)) / np.sqrt(2)
+    cum = np.cumsum(shocks * sig_h, axis=1)
+    paths = p0 * np.exp(cum)
+    return np.hstack([np.full((n_paths, 1), p0), paths])
+
+
+# ----------------------------------------------------------------------
 # График
 # ----------------------------------------------------------------------
 
-def make_chart(f, window_h, coin):
+def make_chart(f, window_h, show_paths, seed):
     s = f["hist"].iloc[-window_h:]
     p0, sig, t0 = f["price"], f["sigma"], s.index[-1]
     hrs = np.arange(0, 25)
@@ -99,6 +117,15 @@ def make_chart(f, window_h, coin):
     fig.add_trace(go.Scatter(x=fut, y=lo50, mode="lines", line=dict(width=0),
                              fill="tonexty", fillcolor="rgba(245,158,11,0.45)",
                              name="Диапазон 50%", hoverinfo="skip"))
+    # симуляция возможных путей
+    if show_paths:
+        paths = simulate_paths(p0, sig, N_PATHS, seed)
+        for i in range(N_PATHS):
+            fig.add_trace(go.Scatter(
+                x=fut, y=paths[i], mode="lines",
+                line=dict(color="rgba(226,232,240,0.40)", width=1.2),
+                name="Примеры путей (симуляция)", legendgroup="sim",
+                showlegend=(i == 0), hoverinfo="skip"))
     # текущая цена
     fig.add_trace(go.Scatter(x=fut, y=[p0] * len(fut), mode="lines",
                              line=dict(color="#e2e8f0", width=1.2, dash="dash"),
@@ -111,8 +138,8 @@ def make_chart(f, window_h, coin):
         textfont=dict(color="#e2e8f0", size=13), hoverinfo="skip"))
 
     fig.update_layout(
-        template="plotly_dark", height=560, hovermode="x unified",
-        margin=dict(t=60, l=10, r=10, b=10),
+        template="plotly_dark", height=580, hovermode="x unified",
+        margin=dict(t=40, l=10, r=10, b=10),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
         yaxis_title="Цена, USD",
     )
@@ -131,11 +158,17 @@ st.title("📊 Крипто-радар")
 st.caption("Прогноз размаха движения BTC и ETH на 24 часа. Это не прогноз направления цены "
            "и не финансовый совет.")
 
+if "seed_shift" not in st.session_state:
+    st.session_state.seed_shift = 0
+
 with st.sidebar:
     st.header("Настройки")
     coin = st.selectbox("Монета", list(COINS.keys()))
     window_label = st.radio("Окно истории на графике", ["48 часов", "72 часа", "7 дней"], index=1)
     window_h = {"48 часов": 48, "72 часа": 72, "7 дней": 168}[window_label]
+    show_paths = st.checkbox("Показать примеры возможных путей (симуляция)", value=True)
+    if st.button("🔄 Другие примеры"):
+        st.session_state.seed_shift += 1
     st.divider()
     st.subheader("Калькулятор риска")
     balance = st.number_input("Баланс, USD", min_value=10.0, value=1000.0, step=100.0)
@@ -162,8 +195,14 @@ c3.metric("Диапазон 80%",
           f"{price * np.exp(-Z80 * sig):,.0f} – {price * np.exp(Z80 * sig):,.0f}")
 c4.metric("Диапазон 50%",
           f"{price * np.exp(-Z50 * sig):,.0f} – {price * np.exp(Z50 * sig):,.0f}")
+
 st.subheader(f"{coin}: цена и диапазон на ближайшие 24 часа")
-st.plotly_chart(make_chart(f, window_h, coin), use_container_width=True)
+seed = int(f["t"].timestamp()) + st.session_state.seed_shift
+st.plotly_chart(make_chart(f, window_h, show_paths, seed), use_container_width=True)
+if show_paths:
+    st.caption("Тонкие белые линии: 12 случайных сценариев с размахом из прогноза. Направление "
+               "в них случайное: это иллюстрация, как цена может двигаться внутри диапазона, "
+               "а не прогноз пути. Кнопка «Другие примеры» в боковой панели рисует новые.")
 
 left, right = st.columns(2)
 
