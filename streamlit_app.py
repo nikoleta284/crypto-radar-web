@@ -1,3 +1,6 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -21,7 +24,7 @@ st.set_page_config(page_title="Крипто-радар", page_icon="📊", layou
 
 @st.cache_data(ttl=3600, show_spinner="Загружаю данные...")
 def get_prices(ticker):
-    raw = yf.download(ticker, interval="1h", period="730d", progress=False, auto_adjust=True)
+    raw = yf.download(ticker, interval="1h", period="730d", progress=False, auto_adjust=True, timeout=20)
     if raw is None or raw.empty:
         raise RuntimeError("Источник данных не вернул свечи, попробуйте позже.")
     close = raw['Close']
